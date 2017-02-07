@@ -1,0 +1,238 @@
+---
+title: "Proyecto final"
+author: "Álvaro González Redondo, Laura Tirado Lopez"
+date: "2 de junio de 2016"
+output:
+  pdf_document:
+    highlight: zenburn
+    pandoc_args: --latex-engine=xelatex
+    toc: yes
+  html_document:
+    toc: yes
+---
+
+``` {r echo=FALSE, message=FALSE}
+load("~/Escritorio/AA_proyecto_workspace.RData")
+library(glmnet)
+library(class)
+library(e1071)
+```
+
+# 1. Definición del problema a resolver y enfoque elegido
+
+El problema que queremos abordar es el **reconocimiento de la actividad humana basado en datos del teléfono móvil**. 
+
+El **Reconocimiento de la Actividad Humana** (**HAR** en sus siglas en inglés) trata de identificar las acciones llevadas a cabo por una persona dado un conjunto de observaciones de la misma y de su contexto[^1]. Los **teléfonos móviles inteligentes (smartphones)** son dispositivos que la mayoría de la gente lleva de forma continuada con comodidad, y disponen de suficientes sensores (acelerómetros, micrófonos...) y capacidad de cómputo. Por ello los smartphones son apropiados para realizar HAR.
+
+El artículo de [Anguita et al.] describe como identificar 6 tipos de acciones mediante un clasificador SVM multiclase a partir de datos obtenidos de smartphones. Como proyecto final nos gustaría intentar replicar sus resultados con el mismo clasificador y base de datos.
+
+El **enfoque** que hemos elegido es aplicar cada uno de los modelos que hemos ido viendo en prácticas en orden de complejidad creciente: 
+
+- Clasificación lineal, sin y con decaimiento de pesos (_lasso_ y _ridge_).
+- $k$-Nearest Neighborhood.
+- Support Vector Machines, con kernel de base radial.
+- Red neuronal multicapa.
+
+Para aquellos modelos en los que es necesario elegir parámetros se ha optado por hacer un `grid-search` de los mismos y elegir aquellos con menor error de validación cruzada.
+
+
+# 2. Codificación de los datos de entrada para hacerlos útiles a los algoritmos.
+
+La base de datos consta de 561 variables de entrada, muy preprocesadas. 
+
+Las primeras variables, tomadas por el acelerómetro y el giroscopio, son la aceleración lineal y la velocidad angular. Se toman series de datos en ventanas temporales de 2.56 segundos a 50 Hz. Estas señales se preprocesaron para reducir el ruido de los datos. La señal de aceleración fue dividida en dos componentes, en la aceleración del cuerpo y gravedad. Además se obtuvieron otras señales adicionales a partir de las recogidas inicialmente por los dispositivos. En total, se obtienen 17 señales a las cuáles se le aplican distintos cálculos como el ángulo entre los vectores, media, correlación, desviación típica, máximo valor, mínimo valor, etc. Tras aplicar esta serie de cálculos a las 17 señales se obtienen las 561 variables. 
+
+
+Aporta un conjunto de training con 7352 casos y otro de test con 2947 casos. Las personas (30 en total) que han aportado los datos para cada conjunto son diferentes.
+
+
+
+# 3. Valoración del interés de la variables para el problema y selección de un subconjunto (en su caso).
+
+El conjunto de variables obtenido por mapeado de características contiene resumida la información de las señales tomadas por los sensores. Los autores originales no hicieron selección de un subconjunto de variables para entrenar el SVM, y nosotros no hemos visto necesario hacerlo con ninguno de los otros modelos.
+
+
+# 4. Normalización de las variables (en su caso)
+
+Los autores de la base de datos normalizaron los datos entre -1 y 1.
+
+
+# 5. Selección de las técnica (paramétrica) y valoración de la idoneidad de la misma frente a otras alternativas
+
+Las técnicas que hemos utilizado han sido:
+
+- Clasificación lineal sin decaimiento de pesos.
+- Clasificación lineal ridge.
+- Clasificación lineal lasso.
+- k-NN.
+- SVM con kernel de base radial, multiclase con One-Vs-All (OVA).
+- Red neuronal multicapa.
+
+Los autores de la base de datos entrenaron un modelo SVM para probar que era útil y hemos querido replicar sus resultados usando dicho modelo. 
+
+Dado que SVM es una técnica con cierta complejidad, decidimos empezar probando modelos más sencillos antes de implementar SVM para comprobar si técnicas con mayor capacidad de generalización no daban mejores resultados para esta base de datos. A su vez, también quisimos probar con una técnica más sofisticada como lo son las redes neuronales para ver si ofrece mejores resultados que SVM. 
+
+
+# 6. Aplicación de la técnica especificando claramente qué algoritmos se usan en la estimación de los parámetros, los hiperparámetros y el error de generalización.
+
+Para aplicar las técnicas hemos estimado los hiperparámetros, luego hemos entrenado un modelo para cada técnica con esos hiperparámetros, y finalmente hemos calculado su error de generalización.
+
+Para **estimar los hiperparámetros** de los modelos hemos implementado búsqueda grid para cada una de las técnicas para buscar los hiperparametros más idóneos. El espacio de búsqueda del algoritmo es el producto cartesiano de los conjuntos de los distintos valores de las variables. Para cada modelo, los valores de las variables utilizadas han sido:
+
+- Clasificación lineal sin decaimiento de pesos: no se ha realizado búsqueda grid.
+- Clasificación lineal ridge: $\lambda \in \{10^{-3}, ..., 10^{6}\}$.
+- Clasificación lineal lasso: $\lambda \in \{10^{-10}, ..., 10^{-1}\}$.
+- k-NN: $k \in \{2,3,4,8,16,32\}$.
+- SVM: 
+    - $C \in \{10^{-1}, ..., 10^4\}$
+    - $\gamma \in \{10^{-4}, ...,1\}$
+- Red neuronal: 
+    - Nº de capas y neuronas: [64,32], [32,10], [10,5], [64], [32], [10]
+    - Regularización l2: [1, 0.1, 0.01, 0.001, 0.0001, 0]
+    - Método de optimización: [SGD, adadelta]
+
+Para la **estimación del error de generalización** utilizamos validación cruzada de 10 particiones en todos las técnicas implementadas.
+
+La **estimación de los parámetros** es calculada por cada una de las técnicas que hemos implementado, para las cuáles se han escogido las hipótesis que tuviesen menor error de generalización gracias a la búsqueda grid y a la validación cruzada.
+
+# 7. Argumentar sobre la idoneidad de la función regularización usada (en su caso)
+
+Para el SVM se ha regularizado mediante el parámetro $C$ (coste).
+
+Para la red neuronal, como hemos ajustado un modelo de regularización _ridge_ y otro de regularización _lasso_, aplicamos _lasso_ como función de regularización al dar mejores resultados que _ridge_.
+
+# 8. Valoración de los resultados ( gráficas, métricas de error, análisis de residuos, etc )
+
+Los resultados para cada una de las ténicas aplicadas son los siguientes:
+
+## Clasificación lineal sin decaimiento de pesos:
+
+Los resultados del modelo son:
+
+```{r echo=FALSE}
+# Obtenemos la salida
+y <- predict(modelo_lineal, newx=as.matrix(X_test))
+# Adaptamos la salida para poder compararla con el vector de etiquetas
+y <- factor(colnames(y)[apply(y,1,function(x) which(x==max(x)))])
+
+# Medimos el error
+print(paste("Error de clasificación en el conjunto test del modelo lineal: ", mean(y!=Y_test), sep=''))
+table(y, Y_test)
+#table(letters[as.numeric(y)], letters[as.numeric(as.factor(Y_test))])
+```
+
+## Clasificación lineal _ridge_
+
+Los resultados de grid-search son:
+
+```{r echo=FALSE}
+library(glmnet)
+plot(modelo_lineal_ridge)
+```
+
+El valor del parámetro $\lambda$ elegido es 0.04206891. Los resultados del modelo son:
+
+```{r echo=FALSE}
+# Obtenemos la salida
+y <- predict(modelo_lineal_ridge, newx=as.matrix(X_test), s='lambda.min') #s='lambda.1se'
+# Adaptamos la salida para poder compararla con el vector de etiquetas
+y <- factor(colnames(y)[apply(y,1,function(x) which(x==max(x)))])
+print(paste("Error de clasificación en el conjunto test del modelo lineal con weight decay (ridge): ", mean(y!=Y_test), sep=''))
+table(y, Y_test)
+```
+
+
+## Clasificación lineal _lasso_
+
+Los resultados de grid-search son:
+ 
+```{r echo=FALSE}
+plot(modelo_lineal_lasso)
+```
+
+El valor del parámetro $\lambda$ elegido es 0.0001409983. Los resultados del modelo son
+
+```{r echo=FALSE}
+y <- predict(modelo_lineal_lasso, newx=as.matrix(X_test), s='lambda.min') #s='lambda.1se'
+# Adaptamos la salida para poder compararla con el vector de etiquetas
+y <- factor(colnames(y)[apply(y,1,function(x) which(x==max(x)))])
+# Medimos el error
+print(paste("Error de clasificación en el conjunto test del modelo lineal con weight decay (lasso): ", mean(y!=Y_test), sep=''))
+table(y, Y_test)
+```
+
+
+## k-NN
+
+Los resultados de grid-search son:
+
+```{r echo=FALSE}
+plot(grid_search_resultados$k, grid_search_resultados$error,
+     main='Error de clasificación en\n función del hiperparámetro k',
+     type='l', xlab='k', ylab='Error')
+```
+
+El mejor valor de $k$ ha sido 3. Los resultados del modelo entrenado con ese parámetro son: 
+
+```{r echo=FALSE}
+y <- knn(X_train, X_test, as.factor(Y_train), k=3)
+print(paste("Error de clasificación en el conjunto test del 3-NN: ", mean(Y_test != y), sep=''))
+table(y, Y_test)
+```
+
+
+## SVM con kernel de base radial
+
+Los resultados de grid-search son:
+
+```{r echo=FALSE}
+error_matrix <- matrix(0, nrow=length(gs.costs), ncol=length(gs.gammas))
+for (i in 1:length(gs.costs)) {
+  for (j in 1:length(gs.gammas)) {
+    error_matrix[i,j] <- grid.results[i+(j-1)*3, 'error']
+  }
+}
+filled.contour(log(gs.costs), log(gs.gammas), log(error_matrix), 
+               main="Error de clasificación\nsegún hiperparámetros", 
+               xlab="log(cost)", ylab="log(gamma)")
+```
+
+Los hiperparámetros con mejores resultados han sido $C=10^4$ y $\gamma = 10^{-3}$. Los resultados del modelo entrenado con esos parámetros son: 
+
+```{r echo=FALSE}
+y <- predict(modelo_svm, newdata=dat_test)
+print(paste("Error de clasificación en el conjunto test del SVM: ", mean(y != dat_test[,'y']), sep=''))
+table(y, dat_test[,'y'])
+```
+
+
+## Red neuronal multicapa
+
+En la búsqueda grid el mejor modelo ha sido con método de optimización _adadelta_, factor de regularización _lasso_ 0.0001, y dos capas con 64 y 32 neuronas. El error de test es $E_{test} = 0.0617$, y la matriz de confusión es 
+
+```{r echo=FALSE}
+matrix(c(526, 0, 11, 0, 0, 0, 0, 393, 96, 0, 0, 2, 0, 14, 518, 0, 0, 0, 0, 0, 0, 482, 9, 5, 0, 0, 0, 4, 392, 24, 0, 0, 1, 14, 2, 454), c(6,6))
+```
+
+# 9. Justificar que se ha obtenido la mejor de las posibles soluciones con la técnica elegida y la muestra dada. Argumentar en términos de la dimensión VC del modelo, el error de generalización y las curvas de aprendizaje. 
+
+Podemos utilizar el conjunto de test como conjunto de validación, $\mathcal{D}_{val}$. Tomamos el conjunto de los modelos de cada técnica como un conjunto de hipótesis de validación, $\mathcal{H}_{val} = \{g_{lineal}, g_{lin\_ridge}, ..., g_{red\_neural}\}$. Como este conjunto se ha obtenido sin información sobre el conjunto de validación, elegir una hipótesis $g_*$ en función del error de clasificación $E_{val}(g_*)$ en el conjunto de validación $\mathcal{D}_{val}$ es equivalente a aprender una hipótesis $g_*$ del conjunto de hipótesis $\mathcal{H}_{val}$ usando los datos del conjunto de validación $\mathcal{D}_{val}$. Aquí los errores de cada hipótesis $g_*$ son errores dentro de la muestra y podemos aplicar la cota VC para conjuntos de hipótesis finitos. La expresión sería:
+
+$$E_{out}(g_*) \leq E_{val}(g_*) + \mathcal{O}\left ( \sqrt{\frac{\log{|\mathcal{H}_{val}|}}{|\mathcal{D}_{val}|}} \right ) = E_{val}(g_*) + \mathcal{O}\left ( \sqrt{\frac{\log{6}}{2947}} \right )$$
+
+Lo que nos da una cota muy buena. 
+
+Por tanto podemos decir que la técnica que da mejores resultados es aquella que tiene el menor error de validación (que tiene la cota de error fuera de la muestra más baja). Las cotas de los modelos son las siguientes:
+
+- Clasificación lineal sin decaimiento de pesos: 0.07827139
+- Clasificación lineal ridge: 0.08268265
+- Clasificación lineal lasso: 0.07284214
+- k-NN: 0.1339212
+- SVM con kernel de base radial: 0.06571624
+- Red neuronal: 0.08641526
+
+Por tanto, el mejor modelo es el SVM con kernel de base radial.
+
+
+[^1]: [Anguita et al.] _A Public Domain Dataset for Human Activity Recognition Using Smartphones._ Davide Anguita, Alessandro Ghio, Luca Oneto, Xavier Parra and Jorge L. Reyes-Ortiz. [](https://www.elen.ucl.ac.be/Proceedings/esann/esannpdf/es2013-84.pdf)
+[^2]: _Human Activity Recognition using Smartphone._ Amin Rasekh, Chien-An Chen, Yan Lu. [](http://arxiv.org/pdf/1401.8212.pdf)

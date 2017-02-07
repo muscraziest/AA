@@ -1,0 +1,336 @@
+---
+title: "Procesamiento de los datos"
+author: "Álvaro González Redondo, Laura Tirado Lopez"
+date: "2 de junio de 2016"
+output:
+  pdf_document:
+    highlight: zenburn
+    pandoc_args: --latex-engine=xelatex
+    toc: yes
+  html_document:
+    toc: yes
+---
+
+# Objetivo del documento
+
+En este documento se realizan todas las pruebas antes de añadir nada al documento `memoria.Rmd` que inicialmente pensé usar para redactar la memoria.
+
+# Cargar datos
+
+## Tablas de datos de training y de test
+
+``` {r}
+path <- '~/Escritorio/2ndo cuatrimestre compartido/AA/3-Proyecto final/UCI HAR Dataset/'
+
+# Cargamos los valores de entrada
+
+X.labels <- as.character(read.table(paste(path, 'features.txt', sep=''))[,2])
+for (i in 1:length(X.labels)) {
+# Hay etiquetas repetidas. Las diferenciamos asignándoles un número.
+  i_rep <- which(X.labels[i]==X.labels)
+  if (length(i_rep)>1) {
+    for (j in 1:length(i_rep)) {
+      X.labels[i_rep[j]] <- paste(X.labels[i_rep[j]], '-', j, sep='')
+    }
+  }
+}
+
+X_train <- read.table(paste(path, 'train/X_train.txt', sep=''))
+X_test <- read.table(paste(path, 'test/X_test.txt', sep=''))
+colnames(X_train) <- X.labels
+colnames(X_test) <- X.labels
+
+
+# Cargamos los valores de salida
+
+Y.labels <- read.table(paste(path, 'activity_labels.txt', sep=''))
+Y.labels[,'V2'] <- as.character(Y.labels[,'V2'])
+
+Y_train <- read.table(paste(path, 'train/y_train.txt', sep=''))
+Y_train <- cbind(n=1:nrow(Y_train), Y_train)
+Y_test <- read.table(paste(path, 'test/y_test.txt', sep=''))
+Y_test <- cbind(n=1:nrow(Y_test), Y_test)
+
+Y_train <- merge(Y_train,Y.labels, by.x='V1', by.y='V1', all.x=T)
+Y_train <- Y_train[order(Y_train$n),'V2']
+Y_test <- merge(Y_test,Y.labels, by.x='V1', by.y='V1', all.x=T)
+Y_test <- Y_test[order(Y_test$n),'V2']
+
+
+# Los agrupamos en data frames, para facilitar su uso en los SVM
+
+dat_train <- data.frame(x=X_train, y=as.factor(Y_train))
+dat_test <- data.frame(x=X_test, y=as.factor(Y_test))
+
+
+# Creamos una matriz de entrada y salida específica para las redes neuronales
+nn_train <- data.frame(x=X_train,
+                       LAYING = Y_train=="LAYING",
+                       SITTING = Y_train=="SITTING",
+                       STANDING = Y_train=="STANDING",
+                       WALKING = Y_train=="WALKING",
+                       WALKING_DOWNSTAIRS = Y_train=="WALKING_DOWNSTAIRS",
+                       WALKING_UPSTAIRS = Y_train=="WALKING_UPSTAIRS")
+nn_test <- data.frame(x=X_test,
+                      LAYING = Y_test=="LAYING",
+                      SITTING = Y_test=="SITTING",
+                      STANDING = Y_test=="STANDING",
+                      WALKING = Y_test=="WALKING",
+                      WALKING_DOWNSTAIRS = Y_test=="WALKING_DOWNSTAIRS",
+                      WALKING_UPSTAIRS = Y_test=="WALKING_UPSTAIRS")
+write.csv(nn_train, file=paste(path, 'train/train.csv' ,sep=''))
+write.csv(nn_test, file=paste(path, 'test/test.csv' ,sep=''))
+```
+
+
+# Pasos a dar
+
+Para hacer bien el proyecto final habrá que dar todos los pasos que hemos ido dando en las prácticas. A saber:
+
+
+## Clasificación lineal multimodal
+
+Usamos la biblioteca `glmnet` que usamos en la práctica 3 para hacer clasificación lineal. Además incluye funciones para hacer validación cruzada.
+
+Si no queremos usar weight-decay ponemos el parámetro `lambda` a 0.
+
+``` {r}
+library(glmnet)
+
+# Creamos el modelo
+modelo_lineal <- glmnet(as.matrix(X_train), Y_train, family='multinomial', lambda=0)
+
+# Obtenemos la salida
+y <- predict(modelo_lineal, newx=as.matrix(X_test))
+# Adaptamos la salida para poder compararla con el vector de etiquetas
+y <- factor(colnames(y)[apply(y,1,function(x) which(x==max(x)))])
+
+# Medimos el error
+print(paste("Error de clasificación del modelo lineal: ", mean(y!=Y_test), sep=''))
+table(y, Y_test)
+```
+
+
+## Clasificación lineal multimodal con weight decay
+
+El weight-decay se hace usando `glmnet` con diferentes valores de lambda. Según el parámetro `alpha` podemos hacer una regresión _lasso_ (`alpha=1`, por defecto, que en cada grupo de predictores que correlacionan entre sí sólo potencia uno y reduce los demás) o _ridge_ (`alpha=0`, reduce todos los predictores que correlacionan entre sí)
+
+
+### Clasificación lineal multimodal con weight decay tipo _ridge_
+
+``` {r}
+library(glmnet)
+
+# Creamos el modelo
+modelo_lineal_ridge <- cv.glmnet(as.matrix(X_train), Y_train, 
+                                 family = 'multinomial', alpha = 0)
+plot(modelo_lineal_ridge)
+
+# Obtenemos la salida
+y <- predict(modelo_lineal_ridge, newx=as.matrix(X_test), s='lambda.min') #s='lambda.1se'
+# Adaptamos la salida para poder compararla con el vector de etiquetas
+y <- factor(colnames(y)[apply(y,1,function(x) which(x==max(x)))])
+
+# Medimos el error
+print(paste("Error de clasificación del modelo lineal con weight decay (ridge): ", mean(y!=Y_test), sep=''))
+table(y, Y_test)
+```
+
+
+### Clasificación lineal multimodal con weight decay tipo _lasso_
+
+``` {r}
+library(glmnet)
+
+# Creamos el modelo
+modelo_lineal_lasso <- cv.glmnet(as.matrix(X_train), Y_train, 
+                                 family = 'multinomial', alpha = 1)
+#modelo_lineal_lasso <- glmnet(as.matrix(X_train), Y_train, lambda=exp(-8.1), family = 'multinomial', alpha = 1)
+plot(modelo_lineal_lasso)
+
+# Obtenemos la salida
+y <- predict(modelo_lineal_lasso, newx=as.matrix(X_test), s='lambda.min') #s='lambda.1se'
+# Adaptamos la salida para poder compararla con el vector de etiquetas
+y <- factor(colnames(y)[apply(y,1,function(x) which(x==max(x)))])
+
+# Medimos el error
+print(paste("Error de clasificación del modelo lineal con weight decay (lasso): ", mean(y!=Y_test), sep=''))
+table(y, Y_test)
+```
+
+
+## Clasificación con k-NN
+
+``` {r}
+library(class)
+
+# Función para hacer validación cruzada de k-NN
+# Ejemplo: 
+# validacion_cruzada_knn(X_train, Y_train, n_grupos=10, k_=3)
+validacion_cruzada_knn <- function(X, Y, n_grupos, k_) {
+  error_de_clasificacion <- 0
+  grupos <- (sample(nrow(X), nrow(X)) %% n_grupos)+1
+  
+  t_inicio <- Sys.time()
+  for (i in 1:n_grupos) {
+    train<-grupos!=i; test<-grupos==i
+    y <- knn(X[train,], X[test,], as.factor(Y[train]), k=k_)
+    error <- mean(Y[test]!=y)
+    error_de_clasificacion <- error_de_clasificacion + error
+
+    t_restante <- as.integer((as.double(Sys.time() - t_inicio, units='secs')/i) * (n_grupos-i))
+    print(paste("   ",k_,"-NN ", i, " de ", n_grupos, 
+                ". Tiempo restante: ", t_restante, "s.", 
+                sep=''))
+  }
+  
+  error_de_clasificacion <- error_de_clasificacion/n_grupos
+  print(paste("   Error de clasificación: ", error_de_clasificacion, sep=''))
+  return(error_de_clasificacion)
+}
+
+
+# Función para buscar el hiperparámetro k 
+# Ejemplo: grid_search_resultados <- grid_search_knn(X_train, Y_train, ks=c(2,3,4,8,16,32))
+grid_search_knn <- function(X, Y, ks, cv.grupos=10) {
+  error <- rep(0, length(ks))
+
+  t_inicio <- Sys.time()
+  for (i in 1:length(ks)) {
+    error[i] <- validacion_cruzada_knn(X,Y, cv.grupos, ks[i])
+    
+    t_restante <- as.integer((as.double(Sys.time() - t_inicio, units='secs')/i) * (length(ks)-i))
+    print(paste(ks[i],"-NN ", i, " de ", length(ks), 
+                ". Tiempo restante: ", t_restante, "s.", 
+                sep=''))
+  }
+  
+  plot(ks, error,
+       main='Error de clasificación en\n función del hiperparámetro k',
+       type='l', xlab='k', ylab='Error')
+  
+  return(data.frame(k=ks, error=error))
+}
+
+
+# Buscamos hiperparámetros
+grid_search_resultados <- grid_search_knn(X_train, Y_train, 
+                                          ks=c(2,3,4,8,16,32))
+grid_search_resultados
+
+plot(grid_search_resultados$k, grid_search_resultados$error,
+     main='Error de clasificación en\n función del hiperparámetro k',
+     type='l', xlab='k', ylab='Error')
+
+# Calculamos el error de clasificación
+y <- knn(X_train, X_test, as.factor(Y_train), k=3)
+mean(Y_test != y)
+table(y, Y_test)
+```
+
+
+
+## Support Vector Machines
+
+``` {r}
+library(e1071)
+
+
+# Función para hacer validación cruzada de un SVM
+# Ejemplo: 
+# validacion_cruzada_svm(dat_train[1:1000,(ncol(dat_train)-10):ncol(dat_train)], n_grupos=10, cost=1e3, gamma=1e-2)
+validacion_cruzada_svm <- function(datos, n_grupos, cost, gamma) {
+  error_de_clasificacion <- 0
+  grupos <- (sample(nrow(datos), nrow(datos)) %% n_grupos)+1
+  
+  t_inicio <- Sys.time()
+  for (i in 1:n_grupos) {
+    train<-grupos!=i; test<-grupos==i
+    modelo <- svm(y ~ ., data=datos[train,], cost=cost, gamma=gamma, kernel='radial')
+    y <- predict(modelo, newdata=datos[test,])
+    error <- mean(datos[test,'y']!=y)
+    error_de_clasificacion <- error_de_clasificacion + error
+
+    t_restante <- as.integer((as.double(Sys.time() - t_inicio, units='secs')/i) * (n_grupos-i))
+    print(paste("   SVM (C=",cost, ", gamma=", gamma, "), ", i, " de ", n_grupos, 
+                ". Tiempo restante: ", t_restante, "s.", 
+                sep=''))
+  }
+  
+  error_de_clasificacion <- error_de_clasificacion/n_grupos
+  print(paste("   Error de clasificación: ", error_de_clasificacion, sep=''))
+  return(error_de_clasificacion)
+}
+
+
+# Búsqueda de hiperparámetros del svm (cost y gamma)
+# Ejemplo: 
+# grid.results <- grid_search_svm(dat_train[1:200,], costs=10**(-1:4), gammas=10**(-4:0))
+grid_search_svm <- function(datos, costs, gammas, cv.grupos=10) {
+  p <- expand.grid(cost=costs, gamma=gammas)
+  error <- rep(0, nrow(p))
+
+  t_inicio <- Sys.time()
+  for (i in 1:nrow(p)) {
+    error[i] <- validacion_cruzada_svm(datos, n_grupos=cv.grupos, 
+                                       cost=p[i,'cost'], gamma=p[i,'gamma'])
+    
+    t_restante <- as.integer((as.double(Sys.time() - t_inicio, units='secs')/i) * (nrow(p)-i))
+    print(paste("SVM (C=", p[i,'cost'], ", gamma=", p[i,'gamma'], "), ", i, " de ", nrow(p),
+                ". Tiempo restante: ", t_restante, "s.", 
+                sep=''))
+  }
+  
+  error_matrix <- matrix(0, nrow=length(costs), ncol=length(gammas))
+  for (i in 1:length(costs)) {
+    for (j in 1:length(gammas)) {
+      error_matrix[i,j] <- error[i+(j-1)*3]
+    }
+  }
+  filled.contour(log(costs), log(gammas), error_matrix, 
+                 main="Error de clasificación según\n hiperparámetros", xlab="cost", ylab="gamma")
+  contour(log(costs), log(gammas), error_matrix, 
+          main="Error de clasificación según\n hiperparámetros", xlab="cost", ylab="gamma")
+
+  return(cbind(p, error=error))
+}
+
+
+# Calculamos los hiperparámetros óptimos
+gs.costs <- 10**(-1:4)
+gs.gammas <- 10**(-4:0)
+grid.results <- grid_search_svm(dat_train, costs=gs.costs, gammas=gs.gammas)
+
+
+# Pintamos la gráfica bonita
+error_matrix <- matrix(0, nrow=length(gs.costs), ncol=length(gs.gammas))
+for (i in 1:length(gs.costs)) {
+  for (j in 1:length(gs.gammas)) {
+    error_matrix[i,j] <- grid.results[i+(j-1)*3, 'error']
+  }
+}
+filled.contour(log(gs.costs), log(gs.gammas), log(error_matrix), 
+               main="Error de clasificación según\n hiperparámetros", 
+               xlab="cost", ylab="gamma")
+contour(log(gs.costs), log(gs.gammas), log(error_matrix), 
+        main="Error de clasificación según\n hiperparámetros", 
+        xlab="cost", ylab="gamma",
+        nlevels=4)
+
+# Entrenamos con todos los datos y con los hiperparámetros elegidos
+i_best <- which(grid.results$error == min(grid.results$error))
+best_cost <- grid.results[i_best,'cost']
+best_gamma <- grid.results[i_best,'gamma']
+modelo_svm <- svm(y ~ ., data=dat_train, kernel='radial', 
+                  cost=best_cost, gamma=best_gamma)
+
+# Calculamos el error de clasificación
+y <- predict(modelo_svm, newdata=dat_test)
+mean(y != dat_test[,'y'])
+table(y, dat_test[,'y'])
+```
+
+
+## Redes neuronales
+
+En Keras.
